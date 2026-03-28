@@ -185,24 +185,48 @@ function stopAutoRefresh() {
 
 // ─── Domain Management ────────────────────────────────────────────────────────
 
-async function searchDomains(query) {
-  const res = await window.pihole.listDomains(query);
-  if (!res.ok) {
-    showError('domains-error', 'Search failed: ' + res.error);
-    return;
-  }
-  renderDomainTable(res.data);
+// Pi-hole v6 may return type as an integer (0=allow exact,1=allow regex,
+// 2=deny exact,3=deny regex) or as a string ("allow"/"deny").
+function domainListType(d) {
+  const t = d.type;
+  if (t === 'allow' || t === 0 || t === 1) return 'allow';
+  if (t === 'deny'  || t === 2 || t === 3) return 'deny';
+  // Fallback: check if a separate "kind" or "list" field is present
+  if (d.list === 'whitelist' || d.list === 0) return 'allow';
+  return 'deny';
 }
 
-function renderDomainTable(data) {
+let allDomains = []; // cache of last-fetched domain list
+
+async function searchDomains(query) {
+  // Only fetch from API when the cache is empty (first load or after add/remove)
+  if (!allDomains.length) {
+    const res = await window.pihole.listDomains();
+    if (!res.ok) {
+      showError('domains-error', 'Failed to load domains: ' + res.error);
+      return;
+    }
+    // Handle multiple possible response shapes
+    allDomains = res.data?.domains ?? res.data?.data ?? res.data ?? [];
+  }
+  renderDomainTable(allDomains, query);
+}
+
+function renderDomainTable(items, query) {
   const tbody = $('table-domains').querySelector('tbody');
-  const items = data?.domains ?? [];
-  if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="muted">No domains found.</td></tr>';
+
+  // Client-side filtering
+  const q = (query || '').trim().toLowerCase();
+  const filtered = q ? items.filter(d => (d.domain ?? '').toLowerCase().includes(q)) : items;
+
+  if (!filtered.length) {
+    const msg = q ? `No domains matching "${escHtml(q)}".` : 'No domains found. Add one above.';
+    tbody.innerHTML = `<tr><td colspan="4" class="muted">${msg}</td></tr>`;
     return;
   }
-  tbody.innerHTML = items.map(d => {
-    const listType = d.type === 'allow' ? 'allow' : 'deny';
+
+  tbody.innerHTML = filtered.map(d => {
+    const listType  = domainListType(d);
     const badgeClass = listType === 'allow' ? 'badge-allow' : 'badge-deny';
     const badgeLabel = listType === 'allow' ? 'Allowlist' : 'Blocklist';
     return `<tr>
@@ -226,6 +250,7 @@ async function addDomain(domain, list) {
     return;
   }
   $('domain-input').value = '';
+  allDomains = []; // invalidate cache
   await searchDomains($('domain-search').value);
 }
 
@@ -235,6 +260,7 @@ async function removeDomain(domain, list) {
     showError('domains-error', 'Failed to remove domain: ' + res.error);
     return;
   }
+  allDomains = []; // invalidate cache
   await searchDomains($('domain-search').value);
 }
 
@@ -255,6 +281,7 @@ async function loadSettings() {
   $('cfg-notify-count').value = cfg.notifyThresholdCount || 50;
   $('cfg-notify-minutes').value = cfg.notifyThresholdMinutes || 5;
   $('cfg-self-signed').checked = cfg.allowSelfSigned || false;
+  $('cfg-notify-enabled').checked = cfg.notificationsEnabled !== false;
   $('password-hint').textContent = cfg.hasPassword ? 'Password is saved. Leave blank to keep it.' : '';
 }
 
@@ -271,7 +298,8 @@ $('settings-form').addEventListener('submit', async (e) => {
     refreshInterval: parseInt($('cfg-refresh').value, 10),
     notifyThresholdCount: parseInt($('cfg-notify-count').value, 10),
     notifyThresholdMinutes: parseInt($('cfg-notify-minutes').value, 10),
-    allowSelfSigned: $('cfg-self-signed').checked
+    allowSelfSigned: $('cfg-self-signed').checked,
+    notificationsEnabled: $('cfg-notify-enabled').checked
   };
 
   const saveRes = await window.pihole.saveConfig(cfg);

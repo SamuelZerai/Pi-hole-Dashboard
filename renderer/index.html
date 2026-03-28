@@ -213,6 +213,11 @@
         <fieldset>
           <legend>Notifications</legend>
 
+          <label class="field checkbox-field">
+            <input id="cfg-notify-enabled" name="notificationsEnabled" type="checkbox" checked />
+            <span>Enable Windows notifications</span>
+          </label>
+
           <label class="field">
             <span>Alert threshold — queries per domain</span>
             <input id="cfg-notify-count" name="notifyThresholdCount" type="number" min="1" max="10000" value="50" class="input-text input-narrow" />

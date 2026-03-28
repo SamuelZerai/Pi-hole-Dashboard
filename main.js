@@ -131,7 +131,7 @@ function handle(channel, fn) {
 handle('config:read', () => {
   const cfg = readConfig();
   // Never send decrypted password back to renderer
-  return { host: cfg.host || '', protocol: cfg.protocol || 'http', allowSelfSigned: cfg.allowSelfSigned || false, hasPassword: !!cfg.password, notifyThresholdCount: cfg.notifyThresholdCount || 50, notifyThresholdMinutes: cfg.notifyThresholdMinutes || 5, refreshInterval: cfg.refreshInterval || 30 };
+  return { host: cfg.host || '', protocol: cfg.protocol || 'http', allowSelfSigned: cfg.allowSelfSigned || false, hasPassword: !!cfg.password, notifyThresholdCount: cfg.notifyThresholdCount || 50, notifyThresholdMinutes: cfg.notifyThresholdMinutes || 5, refreshInterval: cfg.refreshInterval || 30, notificationsEnabled: cfg.notificationsEnabled !== false };
 });
 
 handle('config:save', (cfg) => {
@@ -175,10 +175,11 @@ handle('pihole:gravity', async () => {
   return apiFetch('/info/gravity');
 });
 
-handle('pihole:domains:list', async (query) => {
+handle('pihole:domains:list', async () => {
   if (!session.sid) await authenticate();
-  const q = query ? `?search=${encodeURIComponent(query)}` : '';
-  return apiFetch(`/domains${q}`);
+  // Fetch all domains; filtering is done client-side to avoid relying on
+  // server-side search support which varies across Pi-hole v6 builds.
+  return apiFetch('/domains');
 });
 
 handle('pihole:domains:add', async ({ domain, list }) => {
@@ -207,19 +208,48 @@ handle('pihole:queries:log', async (cursor) => {
 
 // ─── Notification Monitor ─────────────────────────────────────────────────────
 
-const knownClients = new Set();
+const knownClients = new Set();   // keyed by IP string
 let notifyTimer = null;
-const domainHits = new Map(); // domain -> [{timestamp}]
+const domainHits = new Map();     // domain string -> [timestamp, ...]
+const notifyCooldowns = new Map();// key -> last-notified timestamp (10 min cooldown)
+
+const NOTIFY_COOLDOWN_MS = 10 * 60 * 1000;
+
+// Extract a stable string ID and a readable label from a Pi-hole v6 client value.
+// In v6 q.client is an object { ip, name }; in older builds it may be a plain string.
+function clientId(client) {
+  if (!client) return null;
+  if (typeof client === 'object') return client.ip || JSON.stringify(client);
+  return String(client);
+}
+
+function clientLabel(client) {
+  if (!client) return '?';
+  if (typeof client === 'object') return client.name || client.ip || '?';
+  return String(client);
+}
+
+// Return true and record the time if the cooldown for `key` has expired.
+function checkCooldown(key) {
+  const last = notifyCooldowns.get(key) ?? 0;
+  if (Date.now() - last < NOTIFY_COOLDOWN_MS) return false;
+  notifyCooldowns.set(key, Date.now());
+  return true;
+}
 
 function startNotificationMonitor(config) {
   if (notifyTimer) clearInterval(notifyTimer);
   if (!config.host) return;
 
-  const thresholdCount = config.notifyThresholdCount || 50;
+  const thresholdCount   = config.notifyThresholdCount   || 50;
   const thresholdMinutes = config.notifyThresholdMinutes || 5;
 
   notifyTimer = setInterval(async () => {
     if (!session.sid) return;
+    // Re-read config each tick so the enabled toggle takes effect without restart
+    const currentConfig = readConfig();
+    if (currentConfig.notificationsEnabled === false) return;
+
     try {
       const result = await apiFetch(`/queries?from=${Math.floor(Date.now() / 1000) - thresholdMinutes * 60}`);
       const queries = result?.queries ?? [];
@@ -228,38 +258,40 @@ function startNotificationMonitor(config) {
 
       // Track domain query counts
       for (const q of queries) {
-        const domain = q.domain;
+        const domain = typeof q.domain === 'string' ? q.domain : null;
+        if (!domain) continue;
         if (!domainHits.has(domain)) domainHits.set(domain, []);
         domainHits.get(domain).push(now);
       }
 
-      // Prune old entries and check thresholds
+      // Prune and check thresholds
       for (const [domain, times] of domainHits.entries()) {
         const recent = times.filter(t => now - t < windowMs);
         if (recent.length === 0) { domainHits.delete(domain); continue; }
         domainHits.set(domain, recent);
-        if (recent.length >= thresholdCount) {
+        if (recent.length >= thresholdCount && checkCooldown(`domain:${domain}`)) {
           notify(
             'Pi-hole: High Query Rate',
-            `"${domain}" was queried ${recent.length} times in ${thresholdMinutes} min`
+            `Domain ${domain} queried ${recent.length} times in ${thresholdMinutes} min`
           );
-          domainHits.delete(domain); // remove entry to avoid repeat alerts and prevent unbounded growth
+          domainHits.delete(domain);
         }
       }
 
       // Detect new clients
       for (const q of queries) {
-        const client = q.client;
-        if (client && !knownClients.has(client)) {
-          if (knownClients.size > 0) {
-            // Only alert after first population
-            notify('Pi-hole: New Device', `Unknown device detected: ${client}`);
+        const id    = clientId(q.client);
+        const label = clientLabel(q.client);
+        if (!id) continue;
+        if (!knownClients.has(id)) {
+          if (knownClients.size > 0 && checkCooldown(`client:${id}`)) {
+            notify('Pi-hole: New Device', `New device detected: ${label}`);
           }
-          knownClients.add(client);
+          knownClients.add(id);
         }
       }
     } catch {
-      // Silently ignore monitor errors — session may have expired
+      // Silently ignore — session may have expired
     }
   }, 60_000);
 }
