@@ -8,7 +8,10 @@ const fs = require('fs');
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
 
+let configCache = null;
+
 function readConfig() {
+  if (configCache) return configCache;
   try {
     if (!fs.existsSync(CONFIG_PATH)) return {};
     const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -16,6 +19,7 @@ function readConfig() {
       raw.password = safeStorage.decryptString(Buffer.from(raw.passwordEncrypted, 'base64'));
       delete raw.passwordEncrypted;
     }
+    configCache = raw;
     return raw;
   } catch {
     return {};
@@ -33,6 +37,7 @@ function writeConfig(data) {
   }
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(toWrite, null, 2), 'utf8');
+  configCache = null;
 }
 
 // ─── Input Validation ─────────────────────────────────────────────────────────

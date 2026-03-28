@@ -392,8 +392,18 @@ function qlMatchesFilters(q) {
   return true;
 }
 
+let qlLastRenderedCount = -1;
+let qlLastFilterState   = '';
+
 function renderQueryLog() {
   const filtered = qlRows.filter(qlMatchesFilters);
+
+  // Skip full DOM rebuild if nothing changed
+  const filterState = $('ql-filter-client').value + $('ql-filter-domain').value + $('ql-filter-status').value;
+  if (filtered.length === qlLastRenderedCount && filterState === qlLastFilterState) return;
+  qlLastRenderedCount = filtered.length;
+  qlLastFilterState   = filterState;
+
   $('ql-count').textContent = `${filtered.length.toLocaleString()} queries${qlRows.length !== filtered.length ? ` (filtered from ${qlRows.length.toLocaleString()})` : ''}`;
 
   const tbody = $('table-querylog').querySelector('tbody');
