@@ -429,12 +429,16 @@ async function loadQueryLog(reset = false) {
   const incoming = res.data?.queries ?? res.data?.data ?? [];
   qlCursor = res.data?.cursor ?? null;
 
+  const MAX_ROWS = 5000;
+
   if (reset) {
-    qlRows = incoming;
+    qlRows = incoming.slice(-MAX_ROWS);
   } else {
     // Append only new rows (avoid duplicates if cursor is not supported)
     const existingIds = new Set(qlRows.map(r => r.id));
-    qlRows = qlRows.concat(incoming.filter(r => !existingIds.has(r.id)));
+    const merged = qlRows.concat(incoming.filter(r => !existingIds.has(r.id)));
+    // Keep the newest MAX_ROWS entries so memory stays bounded
+    qlRows = merged.length > MAX_ROWS ? merged.slice(-MAX_ROWS) : merged;
   }
 
   renderQueryLog();
