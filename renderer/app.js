@@ -63,11 +63,10 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 async function loadDashboard() {
-  const [statsRes, topDomainsRes, topClientsRes, gravityRes] = await Promise.all([
+  const [statsRes, topDomainsRes, topClientsRes] = await Promise.all([
     window.pihole.getStats(),
     window.pihole.getTopDomains(),
-    window.pihole.getTopClients(),
-    window.pihole.getGravity()
+    window.pihole.getTopClients()
   ]);
 
   if (!statsRes.ok) {
@@ -88,12 +87,12 @@ async function loadDashboard() {
   $('stat-total').textContent = fmt(total);
   $('stat-blocked').textContent = fmt(blocked);
   $('stat-blocked-pct').textContent = pct(blocked, total) + ' blocked';
-  $('stat-clients').textContent = fmt(s?.clients?.unique ?? '—');
 
-  if (gravityRes.ok) {
-    const g = gravityRes.data;
-    $('stat-gravity').textContent = fmt(g?.gravity?.domains_being_blocked ?? g?.domains_being_blocked ?? '—');
-  }
+  // clients.active is the v6 field name; fall back to total if active is absent
+  $('stat-clients').textContent = fmt(s?.clients?.active ?? s?.clients?.total ?? null);
+
+  // gravity is included in the summary response in v6
+  $('stat-gravity').textContent = fmt(s?.gravity?.domains_being_blocked ?? null);
 
   if (topDomainsRes.ok) {
     renderTopDomains(topDomainsRes.data);
@@ -106,26 +105,55 @@ async function loadDashboard() {
   $('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
+// Normalise the various shapes Pi-hole v6 uses for top-domain / top-client lists
+// into a flat array of [label, count] pairs.
+//
+// Observed formats:
+//   v6 object: { "domain.com": 123, ... }
+//   v6 array:  [{ name: "domain.com", count: 123 }, ...]
+//              [{ domain: "...", count: N }, ...]
+//              [{ ip: "...", name: "...", count: N }, ...]
+//   v5 tuple:  [["domain.com", 123], ...]
+function normalisePairs(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.map(item => {
+      if (Array.isArray(item)) return [String(item[0]), Number(item[1])];
+      const label = item.name ?? item.domain ?? item.ip ?? '?';
+      return [String(label), Number(item.count ?? 0)];
+    });
+  }
+  // Plain object { "label": count }
+  if (typeof raw === 'object') {
+    return Object.entries(raw).map(([k, v]) => [k, Number(v)]);
+  }
+  return [];
+}
+
 function renderTopDomains(data) {
   const tbody = $('table-top-domains').querySelector('tbody');
-  const domains = data?.top_queries ?? data?.domains ?? [];
-  if (!domains.length) {
+  // v6 puts blocked domains under data.blocked; fall back to top-level or queries list
+  const raw = data?.blocked ?? data?.top_queries ?? data?.domains ?? data;
+  const pairs = normalisePairs(raw);
+  if (!pairs.length) {
     tbody.innerHTML = '<tr><td colspan="2" class="muted">No data</td></tr>';
     return;
   }
-  tbody.innerHTML = domains.slice(0, 10).map(([domain, count]) =>
+  tbody.innerHTML = pairs.slice(0, 10).map(([domain, count]) =>
     `<tr><td>${escHtml(domain)}</td><td>${fmt(count)}</td></tr>`
   ).join('');
 }
 
 function renderTopClients(data) {
   const tbody = $('table-top-clients').querySelector('tbody');
-  const clients = data?.top_sources ?? data?.clients ?? [];
-  if (!clients.length) {
+  // v6 uses data.sources; v5 used data.top_sources
+  const raw = data?.sources ?? data?.top_sources ?? data?.clients ?? data;
+  const pairs = normalisePairs(raw);
+  if (!pairs.length) {
     tbody.innerHTML = '<tr><td colspan="2" class="muted">No data</td></tr>';
     return;
   }
-  tbody.innerHTML = clients.slice(0, 10).map(([client, count]) =>
+  tbody.innerHTML = pairs.slice(0, 10).map(([client, count]) =>
     `<tr><td>${escHtml(client)}</td><td>${fmt(count)}</td></tr>`
   ).join('');
 }
