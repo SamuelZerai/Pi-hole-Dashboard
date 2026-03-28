@@ -87,6 +87,21 @@ async function apiFetch(urlPath, method = 'GET', body = null, retry = true) {
   return res.json();
 }
 
+async function logout() {
+  if (!session.sid || !session.host) return;
+  try {
+    const url = buildUrl('/auth') + `?sid=${encodeURIComponent(session.sid)}`;
+    await fetch(url, {
+      method: 'DELETE',
+      ...(session.allowSelfSigned ? { agent: new (require('https').Agent)({ rejectUnauthorized: false }) } : {})
+    });
+  } catch {
+    // Best-effort — if the network is gone the session will expire on its own
+  } finally {
+    session.sid = null;
+  }
+}
+
 async function authenticate() {
   const config = readConfig();
   if (!config.host) throw new Error('No Pi-hole host configured.');
@@ -95,6 +110,10 @@ async function authenticate() {
   session.host = config.host;
   session.protocol = config.protocol || 'http';
   session.allowSelfSigned = config.allowSelfSigned || false;
+
+  // Close any existing session before opening a new one to avoid exhausting
+  // Pi-hole's webserver.api.max_sessions limit.
+  await logout();
 
   const password = config.password;
   const url = `${session.protocol}://${session.host}/api/auth`;
@@ -340,5 +359,5 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (notifyTimer) clearInterval(notifyTimer);
-  app.quit();
+  logout().finally(() => app.quit());
 });
