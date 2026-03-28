@@ -45,6 +45,8 @@ function showError(elementId, msg) {
 
 // ─── Tab Navigation ───────────────────────────────────────────────────────────
 
+let qlLoaded = false;
+
 document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const target = btn.dataset.tab;
@@ -57,6 +59,13 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     const section = $('tab-' + target);
     section.classList.remove('hidden');
     section.classList.add('active');
+
+    if (target === 'querylog') {
+      if (!qlLoaded) { qlLoaded = true; loadQueryLog(true); }
+      if ($('ql-live').checked) startQlLive();
+    } else {
+      stopQlLive();
+    }
   });
 });
 
@@ -119,7 +128,7 @@ function normalisePairs(raw) {
   if (Array.isArray(raw)) {
     return raw.map(item => {
       if (Array.isArray(item)) return [String(item[0]), Number(item[1])];
-      const label = item.name ?? item.domain ?? item.ip ?? '?';
+      const label = item.name || item.domain || item.ip || '?';
       return [String(label), Number(item.count ?? 0)];
     });
   }
@@ -293,6 +302,142 @@ $('settings-form').addEventListener('submit', async (e) => {
   // Switch to dashboard and load
   document.querySelector('.nav-btn[data-tab="dashboard"]').click();
   loadDashboard();
+});
+
+// ─── Query Log ────────────────────────────────────────────────────────────────
+
+const QL_STATUS_LABELS = {
+  // Pi-hole v6 integer status codes → human label + CSS class
+  1:  { label: 'Blocked (gravity)',    cls: 'ql-blocked' },
+  2:  { label: 'Allowed (forwarded)',  cls: 'ql-allowed' },
+  3:  { label: 'Allowed (cache)',      cls: 'ql-cached'  },
+  4:  { label: 'Blocked (regex)',      cls: 'ql-blocked' },
+  5:  { label: 'Blocked (blacklist)',  cls: 'ql-blocked' },
+  6:  { label: 'Blocked (upstream)',   cls: 'ql-blocked' },
+  7:  { label: 'Allowed (cache)',      cls: 'ql-cached'  },
+  8:  { label: 'Blocked (CNAME)',      cls: 'ql-blocked' },
+  9:  { label: 'Allowed (retried)',    cls: 'ql-allowed' },
+  10: { label: 'Allowed (ignored)',    cls: 'ql-allowed' },
+  11: { label: 'Blocked (denylist)',   cls: 'ql-blocked' },
+  12: { label: 'Blocked (special)',    cls: 'ql-blocked' },
+  13: { label: 'Allowed (forwarded)',  cls: 'ql-allowed' },
+  14: { label: 'Allowed (gravity)',    cls: 'ql-allowed' },
+  15: { label: 'Allowed (denylist)',   cls: 'ql-allowed' },
+  // String fallbacks used by some v6 builds
+  GRAVITY:   { label: 'Blocked (gravity)', cls: 'ql-blocked' },
+  FORWARDED: { label: 'Allowed',           cls: 'ql-allowed' },
+  CACHE:     { label: 'Cached',            cls: 'ql-cached'  },
+  BLOCKED:   { label: 'Blocked',           cls: 'ql-blocked' },
+  ALLOWED:   { label: 'Allowed',           cls: 'ql-allowed' },
+};
+
+let qlRows = [];          // all fetched rows
+let qlLiveTimer = null;
+let qlCursor = null;      // pagination cursor
+
+function qlStatusInfo(status) {
+  const s = QL_STATUS_LABELS[status] ?? QL_STATUS_LABELS[String(status).toUpperCase()];
+  if (s) return s;
+  const str = String(status ?? '').toLowerCase();
+  if (str.includes('block')) return { label: 'Blocked', cls: 'ql-blocked' };
+  if (str.includes('cache')) return { label: 'Cached',  cls: 'ql-cached'  };
+  return { label: str || '?', cls: 'ql-allowed' };
+}
+
+function qlClientLabel(q) {
+  // client may be an object {ip, name} or a plain string
+  if (!q.client) return '?';
+  if (typeof q.client === 'string') return q.client;
+  return q.client.name || q.client.ip || '?';
+}
+
+function qlMatchesFilters(q) {
+  const fc = $('ql-filter-client').value.trim().toLowerCase();
+  const fd = $('ql-filter-domain').value.trim().toLowerCase();
+  const fs = $('ql-filter-status').value;
+  if (fc && !qlClientLabel(q).toLowerCase().includes(fc)) return false;
+  if (fd && !(q.domain ?? '').toLowerCase().includes(fd)) return false;
+  if (fs) {
+    const { cls } = qlStatusInfo(q.status);
+    if (!cls.includes(fs)) return false;
+  }
+  return true;
+}
+
+function renderQueryLog() {
+  const filtered = qlRows.filter(qlMatchesFilters);
+  $('ql-count').textContent = `${filtered.length.toLocaleString()} queries${qlRows.length !== filtered.length ? ` (filtered from ${qlRows.length.toLocaleString()})` : ''}`;
+
+  const tbody = $('table-querylog').querySelector('tbody');
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">No queries.</td></tr>';
+    return;
+  }
+
+  // Show newest first, cap at 500 rows for performance
+  tbody.innerHTML = filtered.slice(-500).reverse().map(q => {
+    const ts = q.time ? new Date(q.time * 1000).toLocaleTimeString() : '?';
+    const client = escHtml(qlClientLabel(q));
+    const domain = escHtml(q.domain ?? '?');
+    const type   = escHtml(q.type ?? '?');
+    const { label, cls } = qlStatusInfo(q.status);
+    return `<tr>
+      <td class="ql-time">${ts}</td>
+      <td>${client}</td>
+      <td class="ql-domain">${domain}</td>
+      <td class="ql-type">${type}</td>
+      <td><span class="ql-status ${cls}">${escHtml(label)}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadQueryLog(reset = false) {
+  if (!connected) return;
+  if (reset) { qlRows = []; qlCursor = null; }
+
+  const res = await window.pihole.getQueryLog(qlCursor ?? undefined);
+  if (!res.ok) return;
+
+  const incoming = res.data?.queries ?? res.data?.data ?? [];
+  qlCursor = res.data?.cursor ?? null;
+
+  if (reset) {
+    qlRows = incoming;
+  } else {
+    // Append only new rows (avoid duplicates if cursor is not supported)
+    const existingIds = new Set(qlRows.map(r => r.id));
+    qlRows = qlRows.concat(incoming.filter(r => !existingIds.has(r.id)));
+  }
+
+  renderQueryLog();
+}
+
+function startQlLive() {
+  stopQlLive();
+  qlLiveTimer = setInterval(() => {
+    if (connected && $('ql-live').checked) loadQueryLog();
+  }, 5000);
+}
+
+function stopQlLive() {
+  if (qlLiveTimer) { clearInterval(qlLiveTimer); qlLiveTimer = null; }
+}
+
+$('btn-ql-refresh').addEventListener('click', () => loadQueryLog(true));
+
+$('ql-live').addEventListener('change', e => {
+  if (e.target.checked) startQlLive(); else stopQlLive();
+});
+
+$('btn-ql-clear').addEventListener('click', () => {
+  $('ql-filter-client').value = '';
+  $('ql-filter-domain').value = '';
+  $('ql-filter-status').value = '';
+  renderQueryLog();
+});
+
+['ql-filter-client', 'ql-filter-domain', 'ql-filter-status'].forEach(id => {
+  $(id).addEventListener('input', renderQueryLog);
 });
 
 // ─── XSS-safe helpers ─────────────────────────────────────────────────────────

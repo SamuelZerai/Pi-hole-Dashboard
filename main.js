@@ -70,7 +70,8 @@ function fetchOptions(method = 'GET', body = null) {
 }
 
 async function apiFetch(urlPath, method = 'GET', body = null, retry = true) {
-  const url = buildUrl(urlPath) + (session.sid ? `?sid=${encodeURIComponent(session.sid)}` : '');
+  const sep = urlPath.includes('?') ? '&' : '?';
+  const url = buildUrl(urlPath) + (session.sid ? `${sep}sid=${encodeURIComponent(session.sid)}` : '');
   const res = await fetch(url, fetchOptions(method, body));
 
   if (res.status === 401 && retry) {
@@ -196,6 +197,12 @@ handle('pihole:domains:remove', async ({ domain, list }) => {
     throw new Error('Invalid domain name.');
   }
   return apiFetch(`/domains/${list}/exact/${encodeURIComponent(domain)}`, 'DELETE');
+});
+
+handle('pihole:queries:log', async (cursor) => {
+  if (!session.sid) await authenticate();
+  const params = typeof cursor === 'number' ? `?cursor=${cursor}` : '';
+  return apiFetch(`/queries${params}`);
 });
 
 // ─── Notification Monitor ─────────────────────────────────────────────────────

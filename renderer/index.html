@@ -32,6 +32,7 @@
     <nav class="nav">
       <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
       <button class="nav-btn" data-tab="domains">Domains</button>
+      <button class="nav-btn" data-tab="querylog">Query Log</button>
       <button class="nav-btn" data-tab="settings">Settings</button>
     </nav>
   </header>
@@ -118,6 +119,51 @@
           <tr><td colspan="4" class="muted">Search for a domain or add one above.</td></tr>
         </tbody>
       </table>
+    </section>
+
+    <!-- ── Query Log tab ── -->
+    <section id="tab-querylog" class="tab hidden">
+      <div class="section-header">
+        <h2>Query Log</h2>
+        <div class="refresh-row">
+          <label class="ql-live-label">
+            <input type="checkbox" id="ql-live" checked />
+            Auto-refresh
+          </label>
+          <button id="btn-ql-refresh" class="btn-icon" title="Refresh now">&#x21bb;</button>
+        </div>
+      </div>
+
+      <div class="ql-filters">
+        <input id="ql-filter-client" type="text" placeholder="Filter by client…" class="input-text input-ql-filter" />
+        <input id="ql-filter-domain" type="text" placeholder="Filter by domain…" class="input-text input-ql-filter" />
+        <select id="ql-filter-status" class="input-text input-ql-select">
+          <option value="">All statuses</option>
+          <option value="blocked">Blocked</option>
+          <option value="allowed">Allowed</option>
+          <option value="cached">Cached</option>
+        </select>
+        <button id="btn-ql-clear" class="btn">Clear filters</button>
+      </div>
+
+      <div id="ql-count" class="muted ql-count"></div>
+
+      <div class="ql-table-wrap">
+        <table class="data-table ql-table" id="table-querylog">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Client</th>
+              <th>Domain</th>
+              <th>Type</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="5" class="muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <!-- ── Settings tab ── -->

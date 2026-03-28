@@ -24,4 +24,7 @@ contextBridge.exposeInMainWorld('pihole', {
   listDomains: (query) => invoke('pihole:domains:list', query),
   addDomain: (domain, list) => invoke('pihole:domains:add', { domain, list }),
   removeDomain: (domain, list) => invoke('pihole:domains:remove', { domain, list }),
+
+  // Query log
+  getQueryLog: (cursor) => invoke('pihole:queries:log', cursor),
 });
