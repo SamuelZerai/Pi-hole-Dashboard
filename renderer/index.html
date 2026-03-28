@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pi-hole Desktop</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Connection banner (shown when not connected) -->
+  <div id="banner" class="banner hidden">
+    <span id="banner-msg"></span>
+    <button id="banner-dismiss">Dismiss</button>
+  </div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-logo">
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="16" r="15" stroke="#00d4aa" stroke-width="2"/>
+        <circle cx="16" cy="16" r="7" fill="#00d4aa"/>
+        <path d="M16 4 L16 1 M16 31 L16 28 M4 16 L1 16 M31 16 L28 16" stroke="#00d4aa" stroke-width="2"/>
+      </svg>
+      <span class="header-title">Pi-hole Desktop</span>
+    </div>
+    <div class="header-status">
+      <span id="status-dot" class="status-dot disconnected"></span>
+      <span id="status-text">Disconnected</span>
+    </div>
+    <nav class="nav">
+      <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="nav-btn" data-tab="domains">Domains</button>
+      <button class="nav-btn" data-tab="settings">Settings</button>
+    </nav>
+  </header>
+
+  <!-- Main content -->
+  <main class="content">
+
+    <!-- ── Dashboard tab ── -->
+    <section id="tab-dashboard" class="tab active">
+      <div class="section-header">
+        <h2>Dashboard</h2>
+        <div class="refresh-row">
+          <span id="last-updated" class="muted">Never updated</span>
+          <button id="btn-refresh" class="btn-icon" title="Refresh now">&#x21bb;</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Queries Today</div>
+          <div class="stat-value" id="stat-total">—</div>
+        </div>
+        <div class="stat-card highlight">
+          <div class="stat-label">Blocked Queries</div>
+          <div class="stat-value" id="stat-blocked">—</div>
+          <div class="stat-sub" id="stat-blocked-pct">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Gravity List Size</div>
+          <div class="stat-value" id="stat-gravity">—</div>
+          <div class="stat-sub">domains blocked</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Unique Clients</div>
+          <div class="stat-value" id="stat-clients">—</div>
+        </div>
+      </div>
+
+      <div class="lists-row">
+        <div class="list-card">
+          <h3>Top Blocked Domains</h3>
+          <table class="data-table" id="table-top-domains">
+            <thead><tr><th>Domain</th><th>Hits</th></tr></thead>
+            <tbody><tr><td colspan="2" class="muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="list-card">
+          <h3>Top Clients</h3>
+          <table class="data-table" id="table-top-clients">
+            <thead><tr><th>Client</th><th>Queries</th></tr></thead>
+            <tbody><tr><td colspan="2" class="muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Domains tab ── -->
+    <section id="tab-domains" class="tab hidden">
+      <div class="section-header">
+        <h2>Domain Management</h2>
+      </div>
+
+      <div class="domains-toolbar">
+        <input id="domain-search" type="text" placeholder="Search domains…" class="input-text" />
+        <button id="btn-search" class="btn">Search</button>
+        <span class="spacer"></span>
+        <input id="domain-input" type="text" placeholder="domain.example.com" class="input-text input-domain" />
+        <button id="btn-add-allow" class="btn btn-allow">Add to Allowlist</button>
+        <button id="btn-add-block" class="btn btn-block">Add to Blocklist</button>
+      </div>
+
+      <div id="domains-error" class="error-msg hidden"></div>
+
+      <table class="data-table" id="table-domains">
+        <thead>
+          <tr>
+            <th>Domain</th>
+            <th>List</th>
+            <th>Comment</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="4" class="muted">Search for a domain or add one above.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ── Settings tab ── -->
+    <section id="tab-settings" class="tab hidden">
+      <div class="section-header">
+        <h2>Settings</h2>
+      </div>
+
+      <form id="settings-form" class="settings-form" autocomplete="off">
+        <fieldset>
+          <legend>Connection</legend>
+
+          <label class="field">
+            <span>Protocol</span>
+            <select id="cfg-protocol" name="protocol">
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Pi-hole IP / Hostname</span>
+            <input id="cfg-host" name="host" type="text" placeholder="192.168.1.100" class="input-text" required />
+          </label>
+
+          <label class="field">
+            <span>Password</span>
+            <input id="cfg-password" name="password" type="password" placeholder="Leave blank to keep existing" class="input-text" autocomplete="new-password" />
+            <span class="field-hint" id="password-hint"></span>
+          </label>
+
+          <label class="field checkbox-field">
+            <input id="cfg-self-signed" name="allowSelfSigned" type="checkbox" />
+            <span>Allow self-signed certificates (local networks)</span>
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Dashboard</legend>
+
+          <label class="field">
+            <span>Auto-refresh interval (seconds)</span>
+            <input id="cfg-refresh" name="refreshInterval" type="number" min="10" max="3600" value="30" class="input-text input-narrow" />
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Notifications</legend>
+
+          <label class="field">
+            <span>Alert threshold — queries per domain</span>
+            <input id="cfg-notify-count" name="notifyThresholdCount" type="number" min="1" max="10000" value="50" class="input-text input-narrow" />
+          </label>
+
+          <label class="field">
+            <span>within (minutes)</span>
+            <input id="cfg-notify-minutes" name="notifyThresholdMinutes" type="number" min="1" max="60" value="5" class="input-text input-narrow" />
+          </label>
+        </fieldset>
+
+        <div class="settings-actions">
+          <button type="submit" class="btn btn-primary">Save &amp; Connect</button>
+          <span id="settings-status" class="settings-status"></span>
+        </div>
+      </form>
+    </section>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

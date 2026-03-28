@@ -1,0 +1,28 @@
+{
+  "name": "pihole-desktop",
+  "version": "1.0.0",
+  "description": "A Pi-hole management desktop client for Windows built with Electron",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.pihole.desktop",
+    "productName": "Pi-hole Desktop",
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}
